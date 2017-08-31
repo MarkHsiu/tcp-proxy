@@ -1,14 +1,29 @@
 https://github.com/kkzfl22/tcp-proxy
 https://github.com/yanjunli/tcp-proxy
 https://github.com/ynfeng/tcp-proxy/
+https://git.oschina.net/zhcsoft/StudyDemo
+
 NIO 学习 http://ifeve.com/selectors/
 一种以ID特征为依据的数据分片（Sharding）策略
 http://www.cnblogs.com/JeffreyZhao/archive/2010/03/09/sharding-by-id-characteristic.html
+
 github上fork了别人的项目后，再同步更新别人的提交 
 http://jinlong.github.io/2015/10/12/syncing-a-fork/
 http://blog.csdn.net/qq1332479771/article/details/56087333
+
 mysql 协议
+数据包
 https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+响应包
+These rules distinguish whether the packet represents OK or EOF:
+
+    OK: header = 0 and length of packet > 7
+    EOF: header = 0xfe and length of packet < 9
+
+https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_ok_packet.html
+https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_err_packet.html
+https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_eof_packet.html
+
 
 1. 会话相关
 session : 代表一个会话
