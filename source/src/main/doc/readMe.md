@@ -13,6 +13,7 @@ http://jinlong.github.io/2015/10/12/syncing-a-fork/
 http://blog.csdn.net/qq1332479771/article/details/56087333
 
 mysql 协议
+http://hutaow.com/blog/2013/11/06/mysql-protocol-analysis/#433-result-set=
 数据包
 https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 响应包
