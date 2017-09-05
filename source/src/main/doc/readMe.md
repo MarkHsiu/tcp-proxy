@@ -4,6 +4,11 @@ https://github.com/ynfeng/tcp-proxy/
 https://git.oschina.net/zhcsoft/StudyDemo
 https://github.com/jjenkov/java-nio-server/tree/master/src/main/java/com/jenkov/nioserver
 
+收集到三个不错的开源项目。其中pmm-server。挺好用的，就是预警不好配置
+https://github.com/yanjunli/integrations/tree/master/collectd-mysql
+https://github.com/Georce/lepus
+https://www.percona.com/doc/percona-monitoring-and-management/deploy/index.html
+
 NIO 学习 http://ifeve.com/selectors/
 一种以ID特征为依据的数据分片（Sharding）策略
 http://www.cnblogs.com/JeffreyZhao/archive/2010/03/09/sharding-by-id-characteristic.html
