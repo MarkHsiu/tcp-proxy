@@ -9,6 +9,9 @@ https://github.com/yanjunli/integrations/tree/master/collectd-mysql
 https://github.com/Georce/lepus
 https://www.percona.com/doc/percona-monitoring-and-management/deploy/index.html
 
+cache
+https://zhuanlan.zhihu.com/p/27457401
+
 NIO 学习 http://ifeve.com/selectors/
 一种以ID特征为依据的数据分片（Sharding）策略
 http://www.cnblogs.com/JeffreyZhao/archive/2010/03/09/sharding-by-id-characteristic.html
