@@ -16,9 +16,13 @@ NIO 学习 http://ifeve.com/selectors/
 一种以ID特征为依据的数据分片（Sharding）策略
 http://www.cnblogs.com/JeffreyZhao/archive/2010/03/09/sharding-by-id-characteristic.html
 https://github.com/jjenkov/java-nio-server/tree/master/src/main/java/com/jenkov/nioserver
+
 github上fork了别人的项目后，再同步更新别人的提交 
 http://jinlong.github.io/2015/10/12/syncing-a-fork/
 http://blog.csdn.net/qq1332479771/article/details/56087333
+
+YAML 语言教程
+http://www.ruanyifeng.com/blog/2016/07/yaml.html?f=tt
 
 mysql 协议
 http://hutaow.com/blog/2013/11/06/mysql-protocol-analysis/#433-result-set=
