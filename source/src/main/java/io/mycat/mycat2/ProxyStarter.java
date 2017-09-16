@@ -5,13 +5,20 @@ import java.io.IOException;
 import io.mycat.mycat2.beans.ReplicaConfBean;
 import io.mycat.mycat2.beans.ReplicaIndexBean;
 import io.mycat.mycat2.beans.SchemaConfBean;
+import io.mycat.mycat2.loadbalance.LocalLoadChecker;
+import io.mycat.mycat2.loadbalance.RandomStrategy;
 import io.mycat.proxy.*;
+import io.mycat.proxy.NIOAcceptor.ServerType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.mycat.proxy.BufferPool;
+import io.mycat.proxy.MycatReactorThread;
+import io.mycat.proxy.NIOAcceptor;
+import io.mycat.proxy.ProxyRuntime;
 import io.mycat.proxy.man.AdminCommandResovler;
 import io.mycat.proxy.man.ClusterNode;
 import io.mycat.proxy.man.MyCluster;
-import io.mycat.util.YamlUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class ProxyStarter {
 	private static final Logger LOGGER = LoggerFactory.getLogger(ProxyStarter.class);
@@ -31,7 +38,7 @@ public class ProxyStarter {
 
 		if (conf.isClusterEnable()) {
 			// 集群开启状态，需要等集群启动，主节点确认完配置才能提供服务
-			acceptor.startServerChannel(conf.getClusterIP(), conf.getClusterPort(), true);
+			acceptor.startServerChannel(conf.getClusterIP(), conf.getClusterPort(), ServerType.CLUSTER);
 			runtime.setAdminCmdResolver(new AdminCommandResovler());
 			MyCluster cluster = new MyCluster(acceptor.getSelector(), conf.getMyNodeId(), ClusterNode.parseNodesInf(conf.getAllNodeInfs()));
 			runtime.setMyCLuster(cluster);
@@ -49,10 +56,16 @@ public class ProxyStarter {
 		// 开启mycat服务
 		ConfigLoader.INSTANCE.loadAll(conf);
 		NIOAcceptor acceptor = runtime.getAcceptor();
-		acceptor.startServerChannel(conf.getBindIP(), conf.getBindPort(), false);
+		acceptor.startServerChannel(conf.getBindIP(), conf.getBindPort(), ServerType.MYCAT);
 		startReactor();
 		// 初始化
 		init(conf);
+        if(conf.isLoadBalanceEnable()){
+            //开启负载均衡服务
+            runtime.setLocalLoadChecker(new LocalLoadChecker());
+            runtime.setLoadBalanceStrategy(new RandomStrategy());
+            acceptor.startServerChannel(conf.getLoadBalanceIp(), conf.getLoadBalancePort(), ServerType.LOAD_BALANCER);
+        }
 	}
 
 	public void stopProxy() {
@@ -63,10 +76,10 @@ public class ProxyStarter {
 
 	private void startReactor() throws IOException {
 		// Mycat 2.0 Session Manager
-		ProxyReactorThread<?>[] nioThreads = ProxyRuntime.INSTANCE.getReactorThreads();
+		MycatReactorThread[] nioThreads = (MycatReactorThread[]) MycatRuntime.INSTANCE.getReactorThreads();
 		int cpus = nioThreads.length;
 		for (int i = 0; i < cpus; i++) {
-			ProxyReactorThread<?> thread = new ProxyReactorThread<>(new BufferPool(1024 * 10));
+			MycatReactorThread thread = new MycatReactorThread(new BufferPool(1024 * 10));
 			thread.setName("NIO_Thread " + (i + 1));
 			thread.start();
 			nioThreads[i] = thread;
@@ -79,7 +92,7 @@ public class ProxyStarter {
 			value.initMaster();
 			value.getMysqls().forEach(metaBean -> {
 				try {
-					metaBean.init();
+					metaBean.init(value,ProxyRuntime.INSTANCE.maxdataSourceInitTime);
 				} catch (IOException e) {
 					LOGGER.error("error to init metaBean: {}", metaBean.getHostName());
 				}

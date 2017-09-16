@@ -1,39 +1,34 @@
 package io.mycat.mycat2.sqlparser.byteArrayInterface.dynamicAnnotation;
 
-import java.util.List;
+import io.mycat.mycat2.sqlparser.BufferSQLContext;
+import io.mycat.mycat2.sqlparser.SQLParseUtils.HashArray;
+
+import java.util.function.Function;
 
 /**
  * Created by jamie on 2017/9/5.
  */
+
 public class DynamicAnnotation {
-    List<String> match;
-    List<String> actions;
+  final DynamicAnnotationKey key;
+  final DynamicAnnotationMatch match;
+  final Function<BufferSQLContext, BufferSQLContext> actions;
+  final DynamicAnnotationManager manager;
+  final DynamicAnnotationRuntime runtime;
 
-    public static void main(String[] args) {
+  public DynamicAnnotation(DynamicAnnotationKey key, DynamicAnnotationMatch match, Function<BufferSQLContext, BufferSQLContext> actions, DynamicAnnotationManager manager, DynamicAnnotationRuntime runtime) {
+    this.key = key;
+    this.match = match;
+    this.actions = actions;
+    this.manager = manager;
+    this.runtime = runtime;
+  }
 
+  public void match(BufferSQLContext context) {
+    HashArray array = context.getHashArray();
+    match.pick(0, array.getCount(), context, array, context.getBuffer());
+    if (match.isComplete()) {
+      actions.apply(context);
     }
-
-    public List<String> getMatch() {
-        return match;
-    }
-
-    public void setMatch(List<String> match) {
-        this.match = match;
-    }
-
-    public List<String> getActions() {
-        return actions;
-    }
-
-    public void setActions(List<String> actions) {
-        this.actions = actions;
-    }
-
-    @Override
-    public String toString() {
-        return "DynamicAnnotation{" +
-                "match=" + match +
-                ", actions=" + actions +
-                '}';
-    }
+  }
 }
