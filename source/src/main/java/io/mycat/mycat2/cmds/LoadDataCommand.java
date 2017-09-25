@@ -7,7 +7,7 @@ import java.nio.channels.SelectionKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.mycat.mycat2.MyCommand;
+import io.mycat.mycat2.MySQLCommand;
 import io.mycat.mycat2.MySQLSession;
 import io.mycat.mycat2.MycatSession;
 import io.mycat.mycat2.console.SessionKeyEnum;
@@ -19,7 +19,7 @@ import io.mycat.proxy.ProxyBuffer;
  * @author wuzhihui
  *
  */
-public class LoadDataCommand implements MyCommand {
+public class LoadDataCommand implements MySQLCommand {
 
 	private static final Logger logger = LoggerFactory.getLogger(LoadDataCommand.class);
 
@@ -176,7 +176,7 @@ public class LoadDataCommand implements MyCommand {
 		//前段数据透传完成
 		if(flag) {
 			logger.debug("load data finish!!!");
-			session.getMycatSession().curSQLCommand = DirectPassthrouhCmd.INSTANCE;
+			//session.getMycatSession().curSQLCommand = DirectPassthrouhCmd.INSTANCE;
 			// 当load data的包完成后，则又重新打开包完整性检查
 			session.getSessionAttrMap().remove(SessionKeyEnum.SESSION_PKG_READ_FLAG.getKey());
 			//清除临时数组

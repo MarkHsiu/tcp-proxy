@@ -9,20 +9,24 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
+import java.util.concurrent.ConcurrentHashMap;
 
+import io.mycat.mycat2.beans.conf.SchemaBean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.mycat.mycat2.Interceptor.Interceptor;
+import io.mycat.mycat2.Interceptor.impl.BlockSQLIntercepor;
+import io.mycat.mycat2.Interceptor.impl.DefaultIntercepor;
 import io.mycat.mycat2.beans.MySQLMetaBean;
 import io.mycat.mycat2.beans.MySQLRepBean;
-import io.mycat.mycat2.beans.SchemaBean;
 import io.mycat.mycat2.cmds.strategy.AnnotateRouteCmdStrategy;
 import io.mycat.mycat2.cmds.strategy.DBINMultiServerCmdStrategy;
 import io.mycat.mycat2.cmds.strategy.DBInOneServerCmdStrategy;
 import io.mycat.mycat2.console.SessionKeyEnum;
 import io.mycat.mycat2.sqlparser.BufferSQLContext;
 import io.mycat.mycat2.sqlparser.NewSQLContext;
+import io.mycat.mycat2.sqlparser.TokenHash;
 import io.mycat.mycat2.tasks.AsynTaskCallBack;
 import io.mycat.mysql.AutoCommit;
 import io.mycat.mysql.Capabilities;
@@ -46,7 +50,8 @@ public class MycatSession extends AbstractMySQLSession {
 
 	private MySQLSession curBackend;
 
-	public MyCommand curSQLCommand;
+	//所有处理cmd中,用来向前段写数据,或者后端写数据的cmd的
+	public MySQLCommand curSQLCommand;
 
 	public BufferSQLContext sqlContext = new BufferSQLContext();
 
@@ -55,32 +60,45 @@ public class MycatSession extends AbstractMySQLSession {
 	 */
 	public SchemaBean schema;
 
-	private Map<MySQLRepBean, List<MySQLSession>> backendMap = new HashMap<>();
+	private ConcurrentHashMap<MySQLRepBean, List<MySQLSession>> backendMap = new ConcurrentHashMap<>();
 
 	private static List<Byte> masterSqlList = new ArrayList<>();
 
+	private Map<Interceptor,MySQLCommand> SQLCommands = new HashMap<>();
+	
+	/*拦截器列表 用来判断某个cmd是否需要加入的SQLCommands 进行系列的处理*/
+	public static List<Interceptor> interceptorList = new ArrayList<>();
+	
 	static{
 		masterSqlList.add(NewSQLContext.INSERT_SQL);
 		masterSqlList.add(NewSQLContext.UPDATE_SQL);
 		masterSqlList.add(NewSQLContext.DELETE_SQL);
 		masterSqlList.add(NewSQLContext.REPLACE_SQL);
-//		masterSqlList.add(NewSQLContext.SELECT_INTO_SQL);
-//		masterSqlList.add(NewSQLContext.SELECT_FOR_UPDATE_SQL);
+		masterSqlList.add(NewSQLContext.SELECT_INTO_SQL);
+		masterSqlList.add(NewSQLContext.SELECT_FOR_UPDATE_SQL);
+		//TODO select lock in share mode 。 也需要走主节点    需要完善sql 解析器。
 		masterSqlList.add(NewSQLContext.LOAD_SQL);
 		masterSqlList.add(NewSQLContext.CALL_SQL);
 		masterSqlList.add(NewSQLContext.TRUNCATE_SQL);
 
-//		masterSqlList.add(NewSQLContext.BEGIN_SQL);
-//		masterSqlList.add(NewSQLContext.START_SQL);
-//		masterSqlList.add(NewSQLContext.SET_AUTOCOMMIT_SQL);
+		masterSqlList.add(NewSQLContext.BEGIN_SQL);
+		masterSqlList.add(NewSQLContext.START_SQL);  //TODO 需要完善sql 解析器。 将 start transaction 分离出来。
+		masterSqlList.add(NewSQLContext.SET_AUTOCOMMIT_SQL);
+		
+		interceptorList.add(BlockSQLIntercepor.INSTANCE);
+		interceptorList.add(DefaultIntercepor.INSTANCE);
 	}
-
+	
+	
+	public void clearSQLCmdMap() {
+		SQLCommands.clear();
+	}
 	/**
 	 * 获取sql 类型
 	 * @return
 	 */
-	public MyCommand getMyCommand(){
-		switch(schema.type){
+	public MySQLCommand getMyCommand(){
+		switch(schema.getSchemaType()){
 			case DB_IN_ONE_SERVER:
 				return DBInOneServerCmdStrategy.INSTANCE.getMyCommand(this);
 			case DB_IN_MULTI_SERVER:
@@ -284,7 +302,9 @@ public class MycatSession extends AbstractMySQLSession {
 		super.close(normal, hint);
 		//TODO 清理前后端资源
 		this.unbindAllBackend();
-		this.curSQLCommand.clearFrontResouces(this, true);
+		//((MyCommand)this.getSQLCmd(DefaultIntercepor.INSTANCE)).clearFrontResouces(this, true);
+		clearSQLCmdsFrontResouces(true);
+		//this.curSQLCommand.clearFrontResouces(this, true);
 	}
 
 	@Override
@@ -295,7 +315,7 @@ public class MycatSession extends AbstractMySQLSession {
 
 	private String getbackendName(){
 		String backendName = null;
-		switch(schema.type){
+		switch(schema.getSchemaType()){
 			case DB_IN_ONE_SERVER:
 				backendName = schema.getDefaultDN().getMysqlReplica();
 				break;
@@ -325,7 +345,7 @@ public class MycatSession extends AbstractMySQLSession {
 			list = new ArrayList<>();
 			backendMap.putIfAbsent(mysqlSession.getMySQLMetaBean().getRepBean(), list);
 		}
-		logger.debug("add backend connection in mycatSession .{}:{}",mysqlSession.getMySQLMetaBean().getIp(),mysqlSession.getMySQLMetaBean().getPort());
+		logger.debug("add backend connection in mycatSession .{}:{}",mysqlSession.getMySQLMetaBean().getDsMetaBean().getIp(),mysqlSession.getMySQLMetaBean().getDsMetaBean().getPort());
 		list.add(mysqlSession);
 	}
 
@@ -369,12 +389,10 @@ public class MycatSession extends AbstractMySQLSession {
 		// 当前连接如果本次不被使用,会被自动放入 currSessionMap 中
 		if (curBackend != null
 				&& canUseforCurrent(curBackend,targetMetaBean,runOnSlave)){
-			if (logger.isDebugEnabled()){
-				logger.debug("Using cached backend connections for {}。{}:{}"
-							,(runOnSlave ? "read" : "write"),
-							curBackend.getMySQLMetaBean().getIp(),
-							curBackend.getMySQLMetaBean().getPort());
-			}
+			logger.debug("Using cached backend connections for {}。{}:{}"
+						,(runOnSlave ? "read" : "write"),
+						curBackend.getMySQLMetaBean().getDsMetaBean().getIp(),
+						curBackend.getMySQLMetaBean().getDsMetaBean().getPort());
 			reactorThread.syncAndExecute(curBackend,callback);
 			return;
 		}
@@ -393,8 +411,8 @@ public class MycatSession extends AbstractMySQLSession {
 	
 	/**
 	 * 判断连接是否可以被 当前操作使用
-	 * @param balanceType
 	 * @param backend
+	 * @param targetMetaBean
 	 * @param runOnSlave
 	 * @return
 	 */
@@ -419,7 +437,7 @@ public class MycatSession extends AbstractMySQLSession {
      * @return
      */
     private MySQLRepBean getMySQLRepBean(String replicaName){
-       	MycatConfig conf = (MycatConfig) ProxyRuntime.INSTANCE.getProxyConfig();
+       	MycatConfig conf = ProxyRuntime.INSTANCE.getConfig();
 		MySQLRepBean repBean = conf.getMySQLRepBean(replicaName);
 		if (repBean == null) {
 			throw new RuntimeException("no such MySQLRepBean " + replicaName);
@@ -483,12 +501,10 @@ public class MycatSession extends AbstractMySQLSession {
 				curBackend = null;
 			}
 			backendList.remove(result);
-			if (logger.isDebugEnabled()){
-				logger.debug("Using SessionMap backend connections for {}.{}:{}",
-							(runOnSlave ? "read" : "write"),
-							result.getMySQLMetaBean().getIp(),
-							result.getMySQLMetaBean().getPort());
-			}
+			logger.debug("Using SessionMap backend connections for {}.{}:{}",
+						(runOnSlave ? "read" : "write"),
+						result.getMySQLMetaBean().getDsMetaBean().getIp(),
+						result.getMySQLMetaBean().getDsMetaBean().getPort());
 			return result;
 		}
 		return result;
@@ -496,19 +512,24 @@ public class MycatSession extends AbstractMySQLSession {
 
 	/*
 	 * 判断后端连接 是否可以走从节点
-	 * 1. TODO 通过注解走读写分离
-	 * 2. 非事务情况下，走读写分离
-	 * 3. TODO 只读事务情况下，走读写分离
 	 * @return
 	 */
 	private boolean canRunOnSlave(){
+		 //静态注解情况下 走读写分离
+		if(NewSQLContext.ANNOTATION_BALANCE==sqlContext.getAnnotationType()){
+			final long balancevalue = sqlContext.getAnnotationValue(NewSQLContext.ANNOTATION_BALANCE);
+			if(TokenHash.MASTER == balancevalue){
+				return false;
+			}else if(TokenHash.SLAVE == balancevalue){
+				return true;
+			}else{
+				logger.error("sql balance type is invalid, run on slave [{}]",sqlContext.getRealSQL(0));
+			}
+			return true;
+		}
 
-		if((NewSQLContext.ANNOTATION_BALANCE==sqlContext.getAnnotationType()
-				||(NewSQLContext.ANNOTATION_DB_TYPE==sqlContext.getAnnotationType()
-				   &&1==sqlContext.getAnnotationValue(NewSQLContext.ANNOTATION_DB_TYPE)))
-			||(AutoCommit.ON==autoCommit  //非事务场景下，走从节点
-			)){  // 事务场景下, 如果配置了事务内的查询也走读写分离
-
+		 //非事务场景下，走从节点
+		if(AutoCommit.ON ==autoCommit){
 			if(masterSqlList.contains(sqlContext.getSQLType())){
 				return false;
 			}else{
@@ -519,5 +540,41 @@ public class MycatSession extends AbstractMySQLSession {
 			return false;
 		}
 	}	
-
+	
+	/*
+	 * 获取inceptor对应的SQLCommand 
+	 *
+	 */
+	public MySQLCommand getSQLCmd(Interceptor inteceptor) {
+		
+		return SQLCommands.get(inteceptor);
+	}
+	/*
+	 * 放置inceptor对应的SQLCommand 
+	 *
+	 */
+	public void putSQLCmd(Interceptor inteceptor, MySQLCommand command) {
+		SQLCommands.put(inteceptor, command);
+	}
+	
+	public void clearSQLCmdsFrontResouces(boolean sessionCLosed) {
+		interceptorList.forEach(interceptor -> {
+			MySQLCommand command = getSQLCmd(interceptor);
+			if(null != command) {
+				command.clearFrontResouces(this, sessionCLosed);
+			}
+		});
+	}
+	
+	public void clearSQLCmdsBackendResouces(MySQLSession  mysqlSession, boolean sessionCLosed) {
+		interceptorList.forEach(interceptor -> {
+			MySQLCommand command = getSQLCmd(interceptor);
+			if(null != command) {
+				command.clearBackendResouces(mysqlSession, sessionCLosed);
+			}
+		});
+			
+	}
+	
+	
 }

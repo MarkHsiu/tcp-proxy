@@ -1,149 +1,98 @@
 package io.mycat.mycat2;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
+import io.mycat.mycat2.beans.GlobalBean;
 import io.mycat.mycat2.beans.MySQLRepBean;
-import io.mycat.mycat2.beans.ReplicaIndexBean;
-import io.mycat.mycat2.beans.SchemaBean;
-import io.mycat.proxy.ProxyConfig;
+import io.mycat.mycat2.beans.conf.DatasourceConfig;
+import io.mycat.mycat2.beans.conf.SchemaBean;
+import io.mycat.mycat2.beans.conf.SchemaConfig;
+import io.mycat.proxy.ConfigEnum;
+import io.mycat.proxy.Configurable;
 
-public class MycatConfig extends ProxyConfig {
-	
-	public static final long DEFAULT_IDLE_TIMEOUT 				= 30 * 60 * 1000L;
-	public static final long DEFAULT_REPLICA_IDLE_CHECK_PERIOD  = 5 * 60 * 1000L;
-	public static final long DEFAULT_REPLICA_HEARTBEAT_PERIOD   = 10 * 1000L;
-	public static final int  DEFAULT_TIMEREXECTOR               = 2;
-	public static final long DEFAULT_PROCESSOR_CHECK_PERIOD     = 1 * 1000L;
-	
-	
-	// 默认空闲超时时间
-	private long idleTimeout;
-	// 默认复制组 空闲检查周期
-	private long replicaIdleCheckPeriod;
-	// 默认复制组心跳周期 
-	private long replicaHeartbeatPeriod;
-	
-	private int timerExecutor = 0;
-	
-	// sql execute timeout (second)
-	private long sqlExecuteTimeout = 300;
-	private long processorCheckPeriod;
-	
-	private long minSwitchtimeInterval = 30 * 60 * 1000L;  //默认三十分钟
+public class MycatConfig {
+	// 当前节点所用的配置文件的版本
+	private Map<ConfigEnum, Integer> configVersionMap = new HashMap<>();
+	private Map<ConfigEnum, Configurable> configMap = new HashMap<>();
 
-	/**
-	 * 系统中所有MySQLRepBean的Map
-	 */
-	private Map<String, MySQLRepBean> mysqlRepMap = new HashMap<String, MySQLRepBean>();
+    /**
+     * 系统中所有MySQLRepBean的Map
+     */
+    private Map<String, MySQLRepBean> mysqlRepMap = new HashMap<String, MySQLRepBean>();
+    /**
+     * 系统中所有SchemaBean的Map
+     */
+    private Map<String, SchemaBean> mycatSchemaMap = new HashMap<String, SchemaBean>();
+    /**
+     * 默认Schema,取配置文件种第一个Schema
+     */
+    private SchemaBean defaultSchemaBean;
 
-	/**
-	 * 系统中所有SchemaBean的Map
-	 */
-	private Map<String, SchemaBean> mycatSchemaMap = new HashMap<String, SchemaBean>();
+    public void initRepMap() {
+        DatasourceConfig dsConfig = getConfig(ConfigEnum.DATASOURCE);
+        dsConfig.getReplicas().forEach(replica -> {
+            MySQLRepBean repBean = new MySQLRepBean();
+            repBean.setReplicaBean(replica);
+            mysqlRepMap.put(replica.getName(), repBean);
+        });
+    }
 
-	/**
-	 * 默认Schema,取配置文件种第一个Schema
-	 */
-	private SchemaBean defaultSchemaBean;
+    public void initSchemaMap() {
+        SchemaConfig schemaConfig = getConfig(ConfigEnum.SCHEMA);
+        schemaConfig.getSchemas().forEach(schema -> {
+            if (defaultSchemaBean == null) {
+                defaultSchemaBean = schema;
+            }
+            mycatSchemaMap.put(schema.getName(), schema);
+        });
+    }
 
-	private Map<String, Integer> repIndexMap = new HashMap<String, Integer>();
+    public MySQLRepBean getMySQLRepBean(String repName) {
+        return mysqlRepMap.get(repName);
+    }
 
-	public Map<String, MySQLRepBean> getMysqlRepMap() {
-		return this.mysqlRepMap;
+    public SchemaBean getSchemaBean(String schemaName) {
+        return mycatSchemaMap.get(schemaName);
+    }
+
+    /**
+     * 获取指定的配置对象
+     */
+	public <T> T getConfig(ConfigEnum configEnum) {
+		return (T) configMap.get(configEnum);
 	}
 
-	protected void addMySQLRepBean(final MySQLRepBean mySQLRepBean) {
-		this.mysqlRepMap.put(mySQLRepBean.getName(), mySQLRepBean);
+    /**
+     * 添加配置对象,指定版本号,默认版本为1
+     * @param configEnum
+     * @param config
+     * @param version
+     */
+	public void putConfig(ConfigEnum configEnum, Configurable config, Integer version) {
+		configMap.put(configEnum, config);
+		version = version == null ? GlobalBean.INIT_VERSION : version;
+		configVersionMap.put(configEnum, version);
 	}
 
-	protected void addSchemaBean(SchemaBean schemaBean) {
-		if (defaultSchemaBean == null) {
-			defaultSchemaBean = schemaBean;
-		}
-		this.mycatSchemaMap.put(schemaBean.getName(), schemaBean);
+	public Map<ConfigEnum, Integer> getConfigVersionMap() {
+		return configVersionMap;
 	}
 
-	public SchemaBean getMycatSchema(String schema) {
-		return this.mycatSchemaMap.get(schema);
+	public void setConfigVersion(ConfigEnum configEnum, int version) {
+		configVersionMap.put(configEnum, version);
 	}
 
-	public SchemaBean getDefaultMycatSchema() {
-		return this.defaultSchemaBean;
+	public int getConfigVersion(ConfigEnum configEnum) {
+		Integer oldVersion = configVersionMap.get(configEnum);
+		return oldVersion == null ? GlobalBean.INIT_VERSION : oldVersion;
 	}
 
-	public MySQLRepBean getMySQLRepBean(String repName) {
-		return this.mysqlRepMap.get(repName);
-	}
-	
-	public Collection<MySQLRepBean> getMySQLReplicaSet(){
-		return this.mysqlRepMap.values();
-	}
+    public Map<String, MySQLRepBean> getMysqlRepMap() {
+        return mysqlRepMap;
+    }
 
-	public Integer getRepIndex(String repName) {
-		return repIndexMap.get(repName);
-	}
-
-	public void addRepIndex(ReplicaIndexBean replicaIndexBean) {
-		if (replicaIndexBean != null && replicaIndexBean.getReplicaIndexes() != null) {
-			replicaIndexBean.getReplicaIndexes().forEach((key, value) -> repIndexMap.put(key, value));
-		}
-	}
-
-	public long getIdleTimeout() {
-		return idleTimeout;
-	}
-
-	public void setIdleTimeout(long idleTimeout) {
-		this.idleTimeout = idleTimeout;
-	}
-
-	public int getTimerExecutor() {
-		return timerExecutor;
-	}
-
-	public void setTimerExecutor(int timerExecutor) {
-		this.timerExecutor = timerExecutor;
-	}
-
-	public long getSqlExecuteTimeout() {
-		return sqlExecuteTimeout;
-	}
-
-	public void setSqlExecuteTimeout(long sqlExecuteTimeout) {
-		this.sqlExecuteTimeout = sqlExecuteTimeout;
-	}
-
-	public long getProcessorCheckPeriod() {
-		return processorCheckPeriod;
-	}
-
-	public void setProcessorCheckPeriod(long processorCheckPeriod) {
-		this.processorCheckPeriod = processorCheckPeriod;
-	}
-
-	public long getReplicaIdleCheckPeriod() {
-		return replicaIdleCheckPeriod;
-	}
-
-	public void setReplicaIdleCheckPeriod(long replicaIdleCheckPeriod) {
-		this.replicaIdleCheckPeriod = replicaIdleCheckPeriod;
-	}
-
-	public long getReplicaHeartbeatPeriod() {
-		return replicaHeartbeatPeriod;
-	}
-
-	public void setReplicaHeartbeatPeriod(long replicaHeartbeatPeriod) {
-		this.replicaHeartbeatPeriod = replicaHeartbeatPeriod;
-	}
-
-	public long getMinSwitchtimeInterval() {
-		return minSwitchtimeInterval;
-	}
-
-	public void setMinSwitchtimeInterval(long minSwitchtimeInterval) {
-		this.minSwitchtimeInterval = minSwitchtimeInterval;
-	}
+    public SchemaBean getDefaultSchemaBean() {
+        return defaultSchemaBean;
+    }
 }

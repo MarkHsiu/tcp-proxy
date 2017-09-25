@@ -1,10 +1,10 @@
 package io.mycat.proxy;
+
 /**
  * 运行时环境，单例方式访问
  * @author wuzhihui
  *
  */
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -14,6 +14,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import io.mycat.mycat2.beans.conf.HeartbeatConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +35,7 @@ import io.mycat.proxy.man.MyCluster;
 import io.mycat.util.TimeUtil;
 
 public class ProxyRuntime {
-
+	public static final ProxyRuntime INSTANCE = new ProxyRuntime();
 	private static final Logger logger = LoggerFactory.getLogger(ProxyRuntime.class);
 
 	/*
@@ -46,8 +47,7 @@ public class ProxyRuntime {
 	private static final String REPLICA_ILDE_CHECK = "REPLICA_ILDE_CHECK";
 	private static final String REPLICA_HEARTBEAT  = "REPLICA_HEARTBEAT";
 
-	private ProxyConfig proxyConfig;
-	public static final ProxyRuntime INSTANCE = new ProxyRuntime();
+	private MycatConfig config;
 	private AtomicInteger sessionId = new AtomicInteger(1);
 	private int nioReactorThreads = 2;
 	private boolean traceProtocol = false;
@@ -70,15 +70,13 @@ public class ProxyRuntime {
 	private NameableExecutor businessExecutor;
 	private ListeningExecutorService listeningExecutorService;
 
-
-
 	private Map<String,ScheduledFuture<?>> heartBeatTasks = new HashMap<>();
 	private NameableExecutor timerExecutor;
 	private ScheduledExecutorService heartbeatScheduler;
-
+	
 	public  long maxdataSourceInitTime = 60 * 1000L;
-
-
+	
+	
 	/**
 	 * 是否双向同时通信，大部分TCP Server是单向的，即发送命令，等待应答，然后下一个
 	 */
@@ -96,13 +94,12 @@ public class ProxyRuntime {
 	public void init() {
 		//心跳调度独立出来，避免被其他任务影响
 		heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
-		timerExecutor = ExecutorUtil.create("Timer", ((MycatConfig)getProxyConfig()).getTimerExecutor());
+		HeartbeatConfig heartbeatConfig = config.getConfig(ConfigEnum.HEARTBEAT);
+		timerExecutor = ExecutorUtil.create("Timer", heartbeatConfig.getHeartbeat().getTimerExecutor());
 		businessExecutor = ExecutorUtil.create("BusinessExecutor",Runtime.getRuntime().availableProcessors());
 		listeningExecutorService = MoreExecutors.listeningDecorator(businessExecutor);
-		startUpdateTimeTask();
-		startHeartBeatScheduler();
 	}
-
+	
 	public ProxyReactorThread<?> getProxyReactorThread(ReactorEnv reactorEnv){
 		// 找到一个可用的NIO Reactor Thread，交付托管
 		if (reactorEnv.counter++ == Integer.MAX_VALUE) {
@@ -112,20 +109,14 @@ public class ProxyRuntime {
 		// 获取一个reactor对象
 		return ProxyRuntime.INSTANCE.getReactorThreads()[index];
 	}
-
-	public void startUpdateTimeTask(){
-		heartbeatScheduler.scheduleAtFixedRate(updateTime(),
-											   0L,
-											   TIME_UPDATE_PERIOD,
-											   TimeUnit.MILLISECONDS);
-	}
-
+	
 	/**
 	 * 启动心跳检测任务
 	 */
 	public void startHeartBeatScheduler(){
 		if(heartBeatTasks.get(REPLICA_HEARTBEAT)==null){
-			long replicaHeartbeat = ((MycatConfig)getProxyConfig()).getReplicaHeartbeatPeriod();
+			HeartbeatConfig heartbeatConfig = config.getConfig(ConfigEnum.HEARTBEAT);
+			long replicaHeartbeat = heartbeatConfig.getHeartbeat().getReplicaHeartbeatPeriod();
 			heartBeatTasks.put(REPLICA_HEARTBEAT,
 					heartbeatScheduler.scheduleAtFixedRate(replicaHeartbeat(),
 														  0,
@@ -134,39 +125,34 @@ public class ProxyRuntime {
 		}
 	}
 
+	public void addBusinessJob(Runnable job) {
+		businessExecutor.execute(job);
+	}
+
+	public void addDelayedJob(Runnable job, int delayedSeconds) {
+		schedulerService.schedule(job, delayedSeconds, TimeUnit.SECONDS);
+	}
+
 	/**
 	 * 切换 metaBean 名称
-	 * @param metaBean
 	 */
 	public void startSwitchDataSource(String replBean,Integer writeIndex){
-
-		System.err.println("TODO 收到集群切换 请求，开始切换");
-
-		MycatConfig config = (MycatConfig) getProxyConfig();
-		MySQLRepBean repBean = config.getMySQLReplicaSet()
-		  .stream().filter(f->f.getName().equals(replBean))
-		  .findFirst().orElse(null);
-
-		if(repBean!=null){
-			businessExecutor.execute(()->{
-
+		MySQLRepBean repBean = config.getMySQLRepBean(replBean);
+		
+		if (repBean != null){
+			addBusinessJob(() -> {
 				repBean.setSwitchResult(false);
 				repBean.switchSource(writeIndex,maxdataSourceInitTime);
 
-				if(repBean.getSwitchResult().get()){
-					//TODO 切换成功. 通知集群
-					logger.info("switch datasource success");
-					System.err.println("switch datasource success");
-					startHeartBeatScheduler();
-				}else{
-					System.err.println("switch datasource error");
-					logger.error("switch datasource error");
-					//TODO 切换失败. 通知集群
+				if (repBean.getSwitchResult().get()){
+					logger.info("success to switch datasource for replica: {}, writeIndex: {}", repBean, writeIndex);
+				} else {
+					logger.error("error to switch datasource for replica: {}, writeIndex: {}", repBean, writeIndex);
 				}
 			});
-		}
+		}	
 	}
-
+	
 	/**
 	 * 停止
 	 */
@@ -174,7 +160,7 @@ public class ProxyRuntime {
 		heartBeatTasks.values().stream().forEach(f->f.cancel(false));
 		heartBeatTasks.clear();
 	}
-
+	
 	// 系统时间定时更新任务
 	private Runnable updateTime() {
 		return new Runnable() {
@@ -184,17 +170,12 @@ public class ProxyRuntime {
 			}
 		};
 	}
-
+		
 	// 数据节点定时心跳任务
 	private Runnable replicaHeartbeat() {
 		return ()->{
 			ProxyReactorThread<?> reactor  = getReactorThreads()[ThreadLocalRandom.current().nextInt(getReactorThreads().length)];
-			reactor.addNIOJob(()->{
-				MycatConfig config = (MycatConfig) getProxyConfig();
-				config.getMySQLReplicaSet()
-					  .stream()
-					  .forEach(f->f.doHeartbeat());
-			});
+			reactor.addNIOJob(()-> config.getMysqlRepMap().values().stream().forEach(f -> f.doHeartbeat()));
 		};
 	}
 
@@ -206,12 +187,12 @@ public class ProxyRuntime {
 		this.myCLuster = myCLuster;
 	}
 
-	public ProxyConfig getProxyConfig() {
-		return proxyConfig;
+	public MycatConfig getConfig() {
+		return config;
 	}
 
-	public void setProxyConfig(ProxyConfig proxyConfig) {
-		this.proxyConfig = proxyConfig;
+	public void setConfig(MycatConfig config) {
+		this.config = config;
 	}
 
 	public static ScheduledExecutorService getSchedulerservice() {
@@ -295,7 +276,8 @@ public class ProxyRuntime {
 	 * 在NIO主线程中调度的延迟任务，重复执行
 	 * 
 	 * @param job
-	 * @param delayedSeconds
+	 * @param initialDelay
+	 * @param period
 	 * @param nioThread
 	 */
 	public void addCronNIOJob(Runnable job, int initialDelay, int period, ProxyReactorThread<?> nioThread) {

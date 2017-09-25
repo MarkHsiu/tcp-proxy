@@ -1,9 +1,6 @@
 package io.mycat.proxy;
 
-import io.mycat.mycat2.beans.ReplicaConfBean;
-import io.mycat.mycat2.beans.ReplicaIndexBean;
-import io.mycat.mycat2.beans.SchemaConfBean;
-import io.mycat.mycat2.beans.ShardingRuleBean;
+import io.mycat.mycat2.beans.conf.*;
 
 import java.util.stream.Stream;
 
@@ -14,23 +11,27 @@ import java.util.stream.Stream;
  * @author: gaozhiwen
  */
 public enum ConfigEnum {
-    DATASOURCE((byte) 1, "datasource.yml", ReplicaConfBean.class),
-    REPLICA_INDEX((byte) 2, "replica-index.yml", ReplicaIndexBean.class),
-    SCHEMA((byte) 3, "schema.yml", SchemaConfBean.class),
-    SHARDING_RULE((byte) 4, "sharding-rule.yml", ShardingRuleBean.class);
+    PROXY((byte) 1, "mycat.yml", ProxyConfig.class),
+    CLUSTER((byte) 2, "cluster.yml", ClusterConfig.class),
+    BALANCER((byte) 3, "balancer.yml", BalancerConfig.class),
+    HEARTBEAT((byte) 4, "heartbeat.yml", HeartbeatConfig.class),
+    DATASOURCE((byte) 5, "datasource.yml", DatasourceConfig.class),
+    REPLICA_INDEX((byte) 6, "replica-index.yml", ReplicaIndexConfig.class),
+    SCHEMA((byte) 7, "schema.yml", SchemaConfig.class),
+    SHARDING_RULE((byte) 8, "sharding-rule.yml", ShardingRuleConfig.class);
 
-    private byte code;
+    private byte type;
     private String fileName;
     private Class clazz;
 
-    ConfigEnum(byte code, String fileName, Class clazz) {
-        this.code = code;
+    ConfigEnum(byte type, String fileName, Class clazz) {
+        this.type = type;
         this.fileName = fileName;
         this.clazz = clazz;
     }
 
-    public byte getCode() {
-        return this.code;
+    public byte getType() {
+        return this.type;
     }
 
     public String getFileName() {
@@ -41,10 +42,8 @@ public enum ConfigEnum {
         return clazz;
     }
 
-    public static ConfigEnum getConfigEnum(byte code) {
-        return Stream.of(ConfigEnum.values()).filter(configEnum -> configEnum.code == code)
+    public static ConfigEnum getConfigEnum(byte type) {
+        return Stream.of(ConfigEnum.values()).filter(configEnum -> configEnum.type == type)
                 .findFirst().orElse(null);
     }
-
-    public static final int INIT_VERSION = 1;
 }
